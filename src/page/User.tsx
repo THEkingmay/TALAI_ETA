@@ -1,66 +1,78 @@
 import { MapContainer, TileLayer, Marker, useMap } from "react-leaflet";
 import "leaflet/dist/leaflet.css";
-import { useEffect, useState } from "react";
-import L from 'leaflet'
+import { useEffect, useState , useRef } from "react";
 
-export default function UserPage() {
-  const KU_KPS_POSITION: [number, number] = [14.0209, 99.9746]; // มก. กำแพงแสน
-   interface COUNT_LOCATION {
-  time: number;
-  location: [number, number];
+interface UserLocation {
+  latitude: number;
+  longitude: number;
 }
 
-  const RecentLocation = () => {
+export default function UserPage() {
+  const KU_KPS_POSITION: [number, number] = [14.0209, 99.9746];
+  const [uid] = useState<string>(() => {
+    return Math.random().toString(36).substring(2, 8); // สุ่มครั้งเดียว
+  });
+  const RealtimeMarkers = () => {
+  const [locations, setLocations] = useState<UserLocation[]>([]);
+  const map = useMap();
+  const wsRef = useRef<WebSocket | null>(null);
 
-    const [count , setCount] = useState<COUNT_LOCATION>({time:0 ,location: [0,0]})
-    const map = useMap()
- const [currentPosition, setCurrentPosition] =
-      useState<[number, number]>(KU_KPS_POSITION);
-    const updateLocation = () => {  
-
-        navigator.geolocation.getCurrentPosition(
-        (position) => {
-            const { latitude, longitude } = position.coords;
-            setCurrentPosition([latitude, longitude]); // ✅ อัปเดต state
-            map.flyTo([latitude , longitude ] , map.getZoom())
-            console.log(position.coords.latitude, position.coords.longitude);
-            setCount(prev=>({time: prev.time+1 , location : [latitude , longitude]}))
-        },
-        (err) => {
-          console.error(err);
-        },
-        { enableHighAccuracy: true, timeout: 5000, maximumAge: 0 }
-      );
-      };
-      
-    useEffect(() => {
-      updateLocation()
-      const interval = setInterval(updateLocation, 5000);
-      return () => clearInterval(interval);
-
-    }, []);
-
-const customIcon = L.divIcon({
-      className: "custom-marker",
-      html: `<div style="background:white;border:1px solid black;
-              border-radius:8px;padding:2px 5px;white-space:nowrap;">
-              📍 ${count.time} รอบ </br>ตำแหน่งปัจจุบัน${count.location}
-             </div>`,
-      iconAnchor: [15, 30],
-    });
-
-
-    if (!currentPosition) return null;
-    return (
-      <div> 
-        <Marker position={currentPosition} icon={customIcon}></Marker>
-      </div>
-    );
+  const sendMessage = (data: any) => {
+    if (wsRef.current && wsRef.current.readyState === WebSocket.OPEN) {
+      console.log("send data" , data)
+      wsRef.current.send(JSON.stringify(data));
+    }
   };
+
+  useEffect(() => {
+    const ws = new WebSocket(`ws://localhost:8000/ws?uid=${uid}`);
+    wsRef.current = ws;
+
+    ws.onopen = () => {
+      console.log("✅ WebSocket connected");
+      navigator.geolocation.getCurrentPosition((pos) => {
+        sendMessage({uid,lat: pos.coords.latitude, lng: pos.coords.longitude });
+        map.flyTo([pos.coords.latitude,  pos.coords.longitude])
+      });
+    };
+
+    ws.onmessage = (event) => {
+      const message = JSON.parse(event.data);
+      if (message.type === "all_locations") {
+        setLocations(message.data);
+      }
+    };
+
+    ws.onclose = () => {
+      console.log("❌ WebSocket closed");
+    };
+
+    const timer = setInterval(() => {
+      navigator.geolocation.getCurrentPosition((pos) => {
+        sendMessage({ uid, lat: pos.coords.latitude, lng: pos.coords.longitude });
+        map.panTo([pos.coords.latitude, pos.coords.longitude]);
+      });
+    }, 5000);
+
+    return () => {
+      ws.close();
+      clearInterval(timer);
+    };
+  }, [map]);
+
+  return (
+    <>
+      {locations?.map((loc, idx) => (
+        <Marker key={idx} position={[loc.latitude, loc.longitude]} />
+      ))}
+    </>
+  );
+};
 
   return (
     <div>
       <div className="text-center">User Page</div>
+      <div>Temp id : {uid}</div>
       <div className="m-5 border">
         <MapContainer
           center={KU_KPS_POSITION}
@@ -71,7 +83,7 @@ const customIcon = L.divIcon({
             attribution='&copy; <a href="https://www.openstreetmap.org/copyright">OpenStreetMap</a> contributors'
             url="https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png"
           />
-          <RecentLocation />
+          <RealtimeMarkers />
         </MapContainer>
       </div>
     </div>
