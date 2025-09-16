@@ -25,7 +25,7 @@ export default function UserPage() {
   };
 
   useEffect(() => {
-    const ws = new WebSocket(`ws://localhost:8000/ws?uid=${uid}`);
+    const ws = new WebSocket(`ws://talai-eta-back.onrender.com/ws?uid=${uid}`);
     wsRef.current = ws;
 
     ws.onopen = () => {
